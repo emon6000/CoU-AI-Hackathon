@@ -1,0 +1,6 @@
+{
+  "name": "AI Hackathon Portal - Comilla University",
+  "description": "Official national-level AI Hackathon portal for Engineering Faculty, Comilla University. Team registration, payment verification, submissions, judge scoring, and admin workflow.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
