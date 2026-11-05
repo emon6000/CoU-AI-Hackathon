@@ -195,134 +195,69 @@ const INITIAL_REVIEWS: Review[] = [];
 
 const INITIAL_CORRECTION_TOKENS: CorrectionToken[] = [];
 
+const API_BASE_URL = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL
+  ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/$/, '')
+  : '';
+
+const apiFetch = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not configured.');
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+    ...init,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message || 'Request failed');
+  }
+
+  return payload as T;
+};
+
 const AppContext = createContext<AppContextType | null>(null);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Local storage state keys
-  const [settings, setSettings] = useState<SystemSettings>(() => {
-    const saved = localStorage.getItem('ai_hackathon_settings');
-    return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-  });
+  const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
 
-  const [teams, setTeams] = useState<Team[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_teams');
-    return saved ? JSON.parse(saved) : INITIAL_TEAMS;
-  });
+  const [teams, setTeams] = useState<Team[]>(INITIAL_TEAMS);
 
-  const [staff, setStaff] = useState<StaffAccount[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_staff');
-    return saved ? JSON.parse(saved) : INITIAL_STAFF;
-  });
+  const [staff, setStaff] = useState<StaffAccount[]>(INITIAL_STAFF);
 
-  const [documents, setDocuments] = useState<ScenarioDocument[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_documents');
-    return saved ? JSON.parse(saved) : INITIAL_DOCUMENTS;
-  });
+  const [documents, setDocuments] = useState<ScenarioDocument[]>(INITIAL_DOCUMENTS);
 
-  const [reviews, setReviews] = useState<Review[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_reviews');
-    return saved ? JSON.parse(saved) : INITIAL_REVIEWS;
-  });
+  const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
 
-  const [onsiteScores, setOnsiteScores] = useState<OnsiteScore[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_onsite_scores');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [onsiteScores, setOnsiteScores] = useState<OnsiteScore[]>([]);
 
-  const [checkins, setCheckins] = useState<Checkin[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_checkins');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [checkins, setCheckins] = useState<Checkin[]>([]);
 
-  const [finalResults, setFinalResults] = useState<FinalResult[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_final_results');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [finalResults, setFinalResults] = useState<FinalResult[]>([]);
 
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_audit_logs');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'log-1',
-        actorType: 'super_admin',
-        actorId: 'staff-admin-1',
-        actorName: 'Super Admin CoU',
-        action: 'INITIALIZE_SYSTEM',
-        targetType: 'system',
-        targetId: 'comilla-uni-2026',
-        detail: { event: 'AI Hackathon 2026 initial configuration deployed' },
-        createdAt: '2026-11-01T10:00:00Z',
-      },
-    ];
-  });
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
+    {
+      id: 'log-1',
+      actorType: 'super_admin',
+      actorId: 'staff-admin-1',
+      actorName: 'Super Admin CoU',
+      action: 'INITIALIZE_SYSTEM',
+      targetType: 'system',
+      targetId: 'comilla-uni-2026',
+      detail: { event: 'AI Hackathon 2026 initial configuration deployed' },
+      createdAt: '2026-11-01T10:00:00Z',
+    },
+  ]);
 
-  const [correctionTokens, setCorrectionTokens] = useState<CorrectionToken[]>(() => {
-    const saved = localStorage.getItem('ai_hackathon_tokens');
-    return saved ? JSON.parse(saved) : INITIAL_CORRECTION_TOKENS;
-  });
+  const [correctionTokens, setCorrectionTokens] = useState<CorrectionToken[]>(INITIAL_CORRECTION_TOKENS);
 
-  // Current logged in user session (default: visitor)
-  const [bannedTeamIds, setBannedTeamIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('ai_hackathon_banned_teams');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_banned_teams', JSON.stringify(bannedTeamIds));
-  }, [bannedTeamIds]);
+  const [bannedTeamIds, setBannedTeamIds] = useState<string[]>([]);
 
-  const [auth, setAuth] = useState<AuthSession>(() => {
-    const saved = localStorage.getItem('ai_hackathon_auth');
-    return saved ? JSON.parse(saved) : { role: 'visitor', user: null };
-  });
-
-  // Sync to local storage
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_settings', JSON.stringify(settings));
-  }, [settings]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_teams', JSON.stringify(teams));
-  }, [teams]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_staff', JSON.stringify(staff));
-  }, [staff]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_documents', JSON.stringify(documents));
-  }, [documents]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_reviews', JSON.stringify(reviews));
-  }, [reviews]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_onsite_scores', JSON.stringify(onsiteScores));
-  }, [onsiteScores]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_checkins', JSON.stringify(checkins));
-  }, [checkins]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_final_results', JSON.stringify(finalResults));
-  }, [finalResults]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_audit_logs', JSON.stringify(auditLogs));
-  }, [auditLogs]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_tokens', JSON.stringify(correctionTokens));
-  }, [correctionTokens]);
-
-  useEffect(() => {
-    localStorage.setItem('ai_hackathon_auth', JSON.stringify(auth));
-  }, [auth]);
+  const [auth, setAuth] = useState<AuthSession>({ role: 'visitor', user: null });
 
   const addAuditLog = (action: string, targetType: string, targetId: string, detail: Record<string, any>) => {
     const newLog: AuditLogEntry = {
@@ -349,6 +284,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loginTeam = (email: string, pass: string) => {
     const cleanEmail = email.trim().toLowerCase();
+
+    if (API_BASE_URL) {
+      void apiFetch<{ success: boolean; error?: string; user?: any; team?: Team }>('/api/auth/team-login', {
+        method: 'POST',
+        body: JSON.stringify({ email: cleanEmail, password: pass }),
+      }).then((payload) => {
+        if (payload.success) {
+          setAuth({
+            role: 'team',
+            user: {
+              id: payload.user?.id || 'team',
+              name: payload.user?.name || 'Team Leader',
+              email: payload.user?.email || cleanEmail,
+              teamId: payload.user?.teamId,
+              mustChangePassword: payload.user?.mustChangePassword || false,
+            },
+          });
+        }
+      }).catch(() => undefined);
+    }
+
     const team = teams.find(
       (t) => t.account?.loginEmail.toLowerCase() === cleanEmail || t.members[0]?.email.toLowerCase() === cleanEmail
     );
@@ -387,6 +343,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loginStaff = (email: string, pass: string) => {
     const cleanEmail = email.trim().toLowerCase();
+
+    if (API_BASE_URL) {
+      void apiFetch<{ success: boolean; error?: string; role?: UserRole; user?: any }>('/api/auth/staff-login', {
+        method: 'POST',
+        body: JSON.stringify({ email: cleanEmail, password: pass }),
+      }).then((payload) => {
+        if (payload.success) {
+          setAuth({
+            role: payload.role || 'super_admin',
+            user: {
+              id: payload.user?.id || 'staff',
+              name: payload.user?.name || 'Staff',
+              email: payload.user?.email || cleanEmail,
+              mustChangePassword: payload.user?.mustChangePassword || false,
+            },
+          });
+        }
+      }).catch(() => undefined);
+    }
+
     const member = staff.find((s) => s.email.toLowerCase() === cleanEmail);
 
     if (!member) {
@@ -490,7 +466,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const registerTeam = (teamData: Omit<Team, 'id' | 'status' | 'createdAt' | 'isFinalist'>) => {
-    // Check duplicates
+    if (API_BASE_URL) {
+      try {
+        apiFetch<{ success: boolean; teamId?: string; error?: string }>('/api/teams/register', {
+          method: 'POST',
+          body: JSON.stringify(teamData),
+        }).then((payload) => {
+          if (payload.success && payload.teamId) {
+            setTeams((prev) => [
+              {
+                ...teamData,
+                id: payload.teamId!,
+                status: 'pending',
+                isFinalist: false,
+                createdAt: new Date().toISOString(),
+              },
+              ...prev,
+            ]);
+          }
+        }).catch(() => undefined);
+      } catch {
+        // fallback below
+      }
+    }
+
     const lowerName = teamData.teamName.trim().toLowerCase();
     if (teams.some((t) => t.teamName.toLowerCase() === lowerName)) {
       return { success: false, error: `Team name "${teamData.teamName}" is already registered. Please choose another.` };
@@ -567,6 +566,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const approveTeam = (teamId: string) => {
+    if (API_BASE_URL) {
+      try {
+        apiFetch<{ success: boolean; temporaryPassword?: string; email?: string; error?: string }>('/api/admin/teams/approve', {
+          method: 'POST',
+          body: JSON.stringify({ teamId }),
+        }).then((payload) => {
+          if (payload.success && payload.temporaryPassword) {
+            const team = teams.find((t) => t.id === teamId);
+            if (team) {
+              setTeams((prev) => prev.map((t) => t.id === teamId ? {
+                ...t,
+                status: 'approved',
+                reviewedBy: auth.user?.id || 'staff',
+                reviewedAt: new Date().toISOString(),
+                account: {
+                  loginEmail: payload.email || team.members[0]?.email || '',
+                  temporaryPassword: payload.temporaryPassword,
+                  mustChangePassword: true,
+                  credentialsSent: false,
+                },
+              } : t));
+            }
+          }
+        }).catch(() => undefined);
+      } catch {
+        // fallback below
+      }
+    }
+
     const team = teams.find((t) => t.id === teamId);
     if (!team) return { success: false, error: 'Team not found' };
 
@@ -618,6 +646,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const requestCorrection = (teamId: string, reason: string) => {
+    if (API_BASE_URL) {
+      try {
+        apiFetch<{ success: boolean; token?: string; error?: string }>('/api/admin/teams/correction', {
+          method: 'POST',
+          body: JSON.stringify({ teamId, reason }),
+        }).then((payload) => {
+          if (payload.success && payload.token) {
+            setCorrectionTokens((prev) => [{ token: payload.token!, teamId, expiresAt: new Date(Date.now() + (settings.correction_link_days || 3) * 86400000).toISOString(), reason }, ...prev]);
+          }
+        }).catch(() => undefined);
+      } catch {
+        // fallback below
+      }
+    }
+
     const token = `token-${teamId}-${Date.now()}`;
     const expiresDays = settings.correction_link_days || 3;
     const expiresAt = new Date(Date.now() + expiresDays * 24 * 3600 * 1000).toISOString();
@@ -1028,14 +1071,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFinalResults([]);
     setCorrectionTokens([]);
     setAuth({ role: 'visitor', user: null });
-    localStorage.clear();
-    localStorage.setItem('ai_hackathon_staff', JSON.stringify(INITIAL_STAFF));
-    localStorage.setItem('ai_hackathon_teams', JSON.stringify([]));
-    localStorage.setItem('ai_hackathon_reviews', JSON.stringify([]));
-    localStorage.setItem('ai_hackathon_tokens', JSON.stringify([]));
-    localStorage.setItem('ai_hackathon_settings', JSON.stringify(DEFAULT_SETTINGS));
-    localStorage.setItem('ai_hackathon_documents', JSON.stringify(INITIAL_DOCUMENTS));
-    localStorage.setItem('ai_hackathon_auth', JSON.stringify({ role: 'visitor', user: null }));
   };
 
   return (
