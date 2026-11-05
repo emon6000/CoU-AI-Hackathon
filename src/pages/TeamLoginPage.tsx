@@ -13,11 +13,11 @@ export const TeamLoginPage: React.FC<{ navigate: (route: string) => void }> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [mustChangeScreen, setMustChangeScreen] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    const res = loginTeam(email, password);
+    const res = await loginTeam(email, password);
     if (!res.success) {
       setErrorMsg(res.error || 'Login failed');
     } else {

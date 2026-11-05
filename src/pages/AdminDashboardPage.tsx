@@ -1316,12 +1316,13 @@ CREATE UNIQUE INDEX uq_team_name ON teams (lower(team_name));
                 </div>
                 <div className="flex items-end">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!newStaffName || !newStaffEmail) {
                         alert('Please fill in name and email.');
                         return;
                       }
-                      const res = createStaff(newStaffName, newStaffEmail, newStaffRole);
+
+                      const res = await createStaff(newStaffName, newStaffEmail, newStaffRole);
                       if (res.success && res.tempPassword) {
                         setStaffCreatedInfo({ email: newStaffEmail, pass: res.tempPassword });
                         setNewStaffName('');

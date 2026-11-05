@@ -10,7 +10,7 @@ export const StaffLoginPage: React.FC<{ navigate: (route: string) => void }> = (
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -21,7 +21,7 @@ export const StaffLoginPage: React.FC<{ navigate: (route: string) => void }> = (
       return;
     }
 
-    const res = loginStaff(email, password);
+    const res = await loginStaff(email, password);
     if (!res.success) {
       const attempts = failedAttempts + 1;
       setFailedAttempts(attempts);

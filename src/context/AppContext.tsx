@@ -32,7 +32,7 @@ interface AuthSession {
 
 interface AppContextType {
   settings: SystemSettings;
-  updateSettings: (newSettings: Partial<SystemSettings>) => void;
+  updateSettings: (newSettings: Partial<SystemSettings>) => Promise<void>;
   teams: Team[];
   staff: StaffAccount[];
   documents: ScenarioDocument[];
@@ -45,18 +45,18 @@ interface AppContextType {
   auth: AuthSession;
   
   // Auth methods
-  loginTeam: (email: string, pass: string) => { success: boolean; error?: string };
-  loginStaff: (email: string, pass: string) => { success: boolean; error?: string; role?: UserRole };
+  loginTeam: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
+  loginStaff: (email: string, pass: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
   logout: () => void;
   changePassword: (newPass: string) => { success: boolean; error?: string };
   switchRoleQuick: (role: UserRole, targetId?: string) => void;
 
   // Registration methods
-  registerTeam: (teamData: Omit<Team, 'id' | 'status' | 'createdAt' | 'isFinalist'>) => {
+  registerTeam: (teamData: Omit<Team, 'id' | 'status' | 'createdAt' | 'isFinalist'>) => Promise<{
     success: boolean;
     error?: string;
     teamId?: string;
-  };
+  }>;
   submitPaymentCorrection: (token: string, newSenderNo: string, newTrxId: string) => {
     success: boolean;
     error?: string;
@@ -70,9 +70,9 @@ interface AppContextType {
   markCredentialsSent: (teamId: string, sent: boolean) => void;
 
   // Documents
-  uploadDocument: (doc: Omit<ScenarioDocument, 'id' | 'createdAt'>) => void;
-  deleteDocument: (id: string) => void;
-  toggleDocumentVisibility: (id: string) => void;
+  uploadDocument: (doc: Omit<ScenarioDocument, 'id' | 'createdAt'>) => Promise<void>;
+  deleteDocument: (id: string) => Promise<void>;
+  toggleDocumentVisibility: (id: string) => Promise<void>;
 
   // Team submission
   saveSubmission: (abstract: string, repoUrl: string, videoUrl: string) => { success: boolean; error?: string };
@@ -85,7 +85,7 @@ interface AppContextType {
   releaseResults: (release: boolean) => void;
 
   // Staff Management
-  createStaff: (name: string, email: string, role: 'moderator' | 'judge') => { success: boolean; tempPassword?: string; error?: string };
+  createStaff: (name: string, email: string, role: 'moderator' | 'judge') => Promise<{ success: boolean; tempPassword?: string; error?: string }>;
   toggleStaffActive: (id: string) => void;
   deleteStaff: (id: string) => void;
 
@@ -197,7 +197,9 @@ const INITIAL_CORRECTION_TOKENS: CorrectionToken[] = [];
 
 const API_BASE_URL = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL
   ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/$/, '')
-  : '';
+  : 'http://localhost:4000';
+
+const AUTH_STORAGE_KEY = 'cou_ai_hackathon_auth';
 
 const apiFetch = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
   if (!API_BASE_URL) {
@@ -257,7 +259,134 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [bannedTeamIds, setBannedTeamIds] = useState<string[]>([]);
 
-  const [auth, setAuth] = useState<AuthSession>({ role: 'visitor', user: null });
+  const [auth, setAuth] = useState<AuthSession>(() => {
+    try {
+      const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!raw) return { role: 'visitor', user: null };
+      const parsed = JSON.parse(raw) as AuthSession;
+      if (!parsed || !parsed.user || !parsed.role) {
+        return { role: 'visitor', user: null };
+      }
+      return parsed;
+    } catch {
+      return { role: 'visitor', user: null };
+    }
+  });
+
+  useEffect(() => {
+    if (auth.user) {
+      window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+    } else {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  }, [auth]);
+
+  const loadStaffData = async () => {
+    if (!API_BASE_URL) return;
+
+    try {
+      const payload = await apiFetch<{ success: boolean; staff?: Array<{ id: string; name: string; email: string; role: string; active: boolean; must_change_password?: boolean; created_at?: string }> }>('/api/admin/staff');
+      if (!payload.success || !Array.isArray(payload.staff)) {
+        return;
+      }
+
+      setStaff(
+        payload.staff.map((member) => ({
+          id: member.id,
+          name: member.name,
+          email: member.email,
+          role: member.role === 'super_admin' || member.role === 'moderator' || member.role === 'judge' ? member.role : 'judge',
+          active: member.active,
+          mustChangePassword: Boolean(member.must_change_password),
+          createdAt: member.created_at || new Date().toISOString(),
+        }))
+      );
+    } catch (error) {
+      console.warn('Unable to load staff data from backend:', error instanceof Error ? error.message : error);
+    }
+  };
+
+  const loadTeamsData = async () => {
+    if (!API_BASE_URL) return;
+
+    try {
+      const payload = await apiFetch<{ success: boolean; teams?: Array<any> }>('/api/admin/teams');
+      if (!payload.success || !Array.isArray(payload.teams)) {
+        return;
+      }
+
+      setTeams(
+        payload.teams.map((team) => ({
+          id: team.id,
+          teamName: team.teamName,
+          university: team.university,
+          description: team.description,
+          status: team.status,
+          adminNote: team.adminNote,
+          reviewedBy: team.reviewedBy,
+          reviewedAt: team.reviewedAt,
+          isFinalist: Boolean(team.isFinalist),
+          finalistSetAt: team.finalistSetAt,
+          createdAt: team.createdAt,
+          members: Array.isArray(team.members) ? team.members : [],
+          payment: team.payment || { method: 'bkash', senderNo: '', trxId: '', amount: 0 },
+          account: team.account,
+        }))
+      );
+    } catch (error) {
+      console.warn('Unable to load team data from backend:', error instanceof Error ? error.message : error);
+    }
+  };
+
+  const loadSettings = async () => {
+    if (!API_BASE_URL) return;
+
+    try {
+      const payload = await apiFetch<{ success?: boolean; ok?: boolean; settings?: SystemSettings; data?: SystemSettings | SystemSettings[] }>('/api/settings');
+      const nextSettings = Array.isArray(payload.data) ? payload.data[0] : payload.settings || payload.data;
+      if (nextSettings && typeof nextSettings === 'object') {
+        setSettings({ ...DEFAULT_SETTINGS, ...nextSettings });
+      }
+    } catch (error) {
+      console.warn('Unable to load settings from backend:', error instanceof Error ? error.message : error);
+    }
+  };
+
+  const loadDocuments = async () => {
+    if (!API_BASE_URL) return;
+
+    try {
+      const payload = await apiFetch<{ success: boolean; documents?: Array<any> }>('/api/documents');
+      if (!payload.success || !Array.isArray(payload.documents)) {
+        return;
+      }
+
+      setDocuments(payload.documents.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        kind: doc.kind,
+        fileKey: doc.fileKey,
+        fileName: doc.fileName,
+        sizeBytes: Number(doc.sizeBytes || 0),
+        visible: Boolean(doc.visible),
+        sortOrder: Number(doc.sortOrder || 0),
+        uploadedBy: doc.uploadedBy || '',
+        createdAt: doc.createdAt || new Date().toISOString(),
+        downloadUrl: doc.downloadUrl,
+      })));
+    } catch (error) {
+      console.warn('Unable to load documents from backend:', error instanceof Error ? error.message : error);
+    }
+  };
+
+  useEffect(() => {
+    if (API_BASE_URL) {
+      loadSettings();
+      loadStaffData();
+      loadTeamsData();
+      loadDocuments();
+    }
+  }, [API_BASE_URL]);
 
   const addAuditLog = (action: string, targetType: string, targetId: string, detail: Record<string, any>) => {
     const newLog: AuditLogEntry = {
@@ -274,35 +403,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs((prev) => [newLog, ...prev]);
   };
 
-  const updateSettings = (newSettings: Partial<SystemSettings>) => {
-    setSettings((prev) => {
-      const updated = { ...prev, ...newSettings };
-      addAuditLog('UPDATE_SETTINGS', 'settings', 'global', newSettings);
-      return updated;
-    });
+  const updateSettings = async (newSettings: Partial<SystemSettings>) => {
+    const nextSettings = { ...settings, ...newSettings };
+    setSettings(nextSettings);
+    addAuditLog('UPDATE_SETTINGS', 'settings', 'global', newSettings);
+
+    if (!API_BASE_URL) {
+      return;
+    }
+
+    try {
+      await apiFetch<{ success: boolean; settings?: SystemSettings }>('/api/admin/settings', {
+        method: 'POST',
+        body: JSON.stringify(nextSettings),
+      });
+    } catch (error) {
+      console.warn('Unable to persist settings to backend:', error instanceof Error ? error.message : error);
+    }
   };
 
-  const loginTeam = (email: string, pass: string) => {
+  const loginTeam = async (email: string, pass: string) => {
     const cleanEmail = email.trim().toLowerCase();
 
     if (API_BASE_URL) {
-      void apiFetch<{ success: boolean; error?: string; user?: any; team?: Team }>('/api/auth/team-login', {
-        method: 'POST',
-        body: JSON.stringify({ email: cleanEmail, password: pass }),
-      }).then((payload) => {
-        if (payload.success) {
-          setAuth({
-            role: 'team',
-            user: {
-              id: payload.user?.id || 'team',
-              name: payload.user?.name || 'Team Leader',
-              email: payload.user?.email || cleanEmail,
-              teamId: payload.user?.teamId,
-              mustChangePassword: payload.user?.mustChangePassword || false,
-            },
-          });
+      try {
+        const payload = await apiFetch<{ success: boolean; error?: string; user?: any; team?: Team }>('/api/auth/team-login', {
+          method: 'POST',
+          body: JSON.stringify({ email: cleanEmail, password: pass }),
+        });
+
+        if (!payload.success) {
+          return { success: false, error: payload.error || 'Team login failed.' };
         }
-      }).catch(() => undefined);
+
+        setAuth({
+          role: 'team',
+          user: {
+            id: payload.user?.id || 'team',
+            name: payload.user?.name || 'Team Leader',
+            email: payload.user?.email || cleanEmail,
+            teamId: payload.user?.teamId,
+            mustChangePassword: payload.user?.mustChangePassword || false,
+          },
+        });
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unable to connect to the server.' };
+      }
     }
 
     const team = teams.find(
@@ -341,26 +488,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
-  const loginStaff = (email: string, pass: string) => {
+  const loginStaff = async (email: string, pass: string) => {
     const cleanEmail = email.trim().toLowerCase();
 
     if (API_BASE_URL) {
-      void apiFetch<{ success: boolean; error?: string; role?: UserRole; user?: any }>('/api/auth/staff-login', {
-        method: 'POST',
-        body: JSON.stringify({ email: cleanEmail, password: pass }),
-      }).then((payload) => {
-        if (payload.success) {
-          setAuth({
-            role: payload.role || 'super_admin',
-            user: {
-              id: payload.user?.id || 'staff',
-              name: payload.user?.name || 'Staff',
-              email: payload.user?.email || cleanEmail,
-              mustChangePassword: payload.user?.mustChangePassword || false,
-            },
-          });
+      try {
+        const payload = await apiFetch<{ success: boolean; error?: string; role?: UserRole; user?: any }>('/api/auth/staff-login', {
+          method: 'POST',
+          body: JSON.stringify({ email: cleanEmail, password: pass }),
+        });
+
+        if (!payload.success) {
+          return { success: false, error: payload.error || 'Staff login failed.' };
         }
-      }).catch(() => undefined);
+
+        setAuth({
+          role: payload.role || 'super_admin',
+          user: {
+            id: payload.user?.id || 'staff',
+            name: payload.user?.name || 'Staff',
+            email: payload.user?.email || cleanEmail,
+            mustChangePassword: payload.user?.mustChangePassword || false,
+          },
+        });
+        return { success: true, role: payload.role || 'super_admin' };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unable to connect to the server.' };
+      }
     }
 
     const member = staff.find((s) => s.email.toLowerCase() === cleanEmail);
@@ -393,6 +547,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     setAuth({ role: 'visitor', user: null });
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
   };
 
   const changePassword = (newPass: string) => {
@@ -465,28 +620,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const registerTeam = (teamData: Omit<Team, 'id' | 'status' | 'createdAt' | 'isFinalist'>) => {
+  const registerTeam = async (teamData: Omit<Team, 'id' | 'status' | 'createdAt' | 'isFinalist'>) => {
     if (API_BASE_URL) {
       try {
-        apiFetch<{ success: boolean; teamId?: string; error?: string }>('/api/teams/register', {
+        const payload = await apiFetch<{ success: boolean; teamId?: string; error?: string; message?: string }>('/api/teams/register', {
           method: 'POST',
           body: JSON.stringify(teamData),
-        }).then((payload) => {
-          if (payload.success && payload.teamId) {
-            setTeams((prev) => [
-              {
-                ...teamData,
-                id: payload.teamId!,
-                status: 'pending',
-                isFinalist: false,
-                createdAt: new Date().toISOString(),
-              },
-              ...prev,
-            ]);
-          }
-        }).catch(() => undefined);
-      } catch {
-        // fallback below
+        });
+
+        if (!payload.success) {
+          return { success: false, error: payload.error || payload.message || 'Registration failed.' };
+        }
+
+        if (payload.teamId) {
+          setTeams((prev) => [
+            {
+              ...teamData,
+              id: payload.teamId!,
+              status: 'pending',
+              isFinalist: false,
+              createdAt: new Date().toISOString(),
+            },
+            ...prev,
+          ]);
+        }
+
+        addAuditLog('REGISTER_TEAM', 'team', payload.teamId || 'new-team', {
+          teamName: teamData.teamName,
+          membersCount: teamData.members.length,
+          method: teamData.payment.method,
+          trxId: teamData.payment.trxId,
+        });
+
+        return { success: true, teamId: payload.teamId };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unable to connect to the server.' };
       }
     }
 
@@ -730,22 +898,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('MARK_CREDENTIALS_SENT', 'team', teamId, { sent });
   };
 
-  const uploadDocument = (doc: Omit<ScenarioDocument, 'id' | 'createdAt'>) => {
+  const uploadDocument = async (doc: Omit<ScenarioDocument, 'id' | 'createdAt'>) => {
     const newDoc: ScenarioDocument = {
       ...doc,
       id: `doc-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
+
+    if (API_BASE_URL) {
+      try {
+        const payload = await apiFetch<{ success: boolean; document?: any; error?: string }>('/api/admin/documents', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...doc,
+            uploadedBy: auth.user?.id || 'admin',
+          }),
+        });
+
+        if (payload.success && payload.document) {
+          setDocuments((prev) => [{
+            ...payload.document,
+            id: payload.document.id,
+            fileKey: payload.document.fileKey,
+            fileName: payload.document.fileName,
+            sizeBytes: Number(payload.document.sizeBytes || 0),
+            visible: Boolean(payload.document.visible),
+            sortOrder: Number(payload.document.sortOrder || 0),
+            uploadedBy: payload.document.uploadedBy || '',
+            createdAt: payload.document.createdAt || new Date().toISOString(),
+          }, ...prev.filter((d) => d.id !== payload.document.id)]);
+          addAuditLog('UPLOAD_DOCUMENT', 'document', payload.document.id, { title: payload.document.title });
+          return;
+        }
+      } catch (error) {
+        console.warn('Unable to persist document to backend:', error instanceof Error ? error.message : error);
+      }
+    }
+
     setDocuments((prev) => [...prev, newDoc]);
     addAuditLog('UPLOAD_DOCUMENT', 'document', newDoc.id, { title: newDoc.title });
   };
 
-  const deleteDocument = (id: string) => {
+  const deleteDocument = async (id: string) => {
+    if (API_BASE_URL) {
+      try {
+        await apiFetch<{ success: boolean; error?: string }>(`/api/admin/documents/${id}`, {
+          method: 'DELETE',
+        });
+      } catch (error) {
+        console.warn('Unable to delete document from backend:', error instanceof Error ? error.message : error);
+      }
+    }
+
     setDocuments((prev) => prev.filter((d) => d.id !== id));
     addAuditLog('DELETE_DOCUMENT', 'document', id, {});
   };
 
-  const toggleDocumentVisibility = (id: string) => {
+  const toggleDocumentVisibility = async (id: string) => {
+    if (API_BASE_URL) {
+      try {
+        const payload = await apiFetch<{ success: boolean; visible?: boolean; error?: string }>(`/api/admin/documents/${id}/visibility`, {
+          method: 'PATCH',
+        });
+
+        if (payload.success) {
+          setDocuments((prev) => prev.map((d) => (d.id === id ? { ...d, visible: Boolean(payload.visible) } : d)));
+          return;
+        }
+      } catch (error) {
+        console.warn('Unable to update document visibility in backend:', error instanceof Error ? error.message : error);
+      }
+    }
+
     setDocuments((prev) =>
       prev.map((d) => (d.id === id ? { ...d, visible: !d.visible } : d))
     );
@@ -887,33 +1111,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateSettings({ results_released: release });
   };
 
-  const createStaff = (name: string, email: string, role: 'moderator' | 'judge') => {
+  const createStaff = async (name: string, email: string, role: 'moderator' | 'judge') => {
     const cleanEmail = email.trim().toLowerCase();
     if (staff.some((s) => s.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: 'Staff with this email already exists' };
     }
 
-    const tempPassword = `${role}_${Math.random().toString(36).substring(2, 7)}!`;
-    const newStaff: StaffAccount = {
-      id: `staff-${Date.now()}`,
-      name,
-      email: cleanEmail,
-      role,
-      active: true,
-      mustChangePassword: true,
-      createdAt: new Date().toISOString(),
-      temporaryPassword: tempPassword,
-    };
+    try {
+      if (API_BASE_URL) {
+        const payload = await apiFetch<{ success: boolean; staff?: { id: string; name: string; email: string; role: string; active: boolean; must_change_password: boolean; created_at: string }; tempPassword?: string; error?: string }>('/api/admin/staff', {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), email: cleanEmail, role }),
+        });
 
-    setStaff((prev) => [...prev, newStaff]);
-    addAuditLog('CREATE_STAFF', 'staff', newStaff.id, { role, email: cleanEmail });
-    return { success: true, tempPassword };
+        if (!payload.success || !payload.staff) {
+          return { success: false, error: payload.error || 'Failed to create staff account.' };
+        }
+
+        const savedStaff: StaffAccount = {
+          id: payload.staff.id,
+          name: payload.staff.name,
+          email: payload.staff.email,
+          role: payload.staff.role === 'super_admin' || payload.staff.role === 'moderator' || payload.staff.role === 'judge' ? payload.staff.role : 'judge',
+          active: Boolean(payload.staff.active),
+          mustChangePassword: Boolean(payload.staff.must_change_password),
+          createdAt: payload.staff.created_at || new Date().toISOString(),
+          temporaryPassword: payload.tempPassword,
+        };
+
+        setStaff((prev) => [savedStaff, ...prev.filter((s) => s.email.toLowerCase() !== cleanEmail)]);
+        addAuditLog('CREATE_STAFF', 'staff', savedStaff.id, { role, email: cleanEmail });
+        return { success: true, tempPassword: payload.tempPassword };
+      }
+
+      const tempPassword = `${role}_${Math.random().toString(36).substring(2, 7)}!`;
+      const newStaff: StaffAccount = {
+        id: `staff-${Date.now()}`,
+        name,
+        email: cleanEmail,
+        role,
+        active: true,
+        mustChangePassword: true,
+        createdAt: new Date().toISOString(),
+        temporaryPassword: tempPassword,
+      };
+
+      setStaff((prev) => [newStaff, ...prev]);
+      addAuditLog('CREATE_STAFF', 'staff', newStaff.id, { role, email: cleanEmail });
+      return { success: true, tempPassword };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unable to create staff account.' };
+    }
   };
 
   const toggleStaffActive = (id: string) => {
-    setStaff((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, active: !s.active } : s))
-    );
+    const target = staff.find((s) => s.id === id);
+    if (!target || target.role === 'super_admin') return;
+
+    setStaff((prev) => prev.map((s) => (s.id === id ? { ...s, active: !s.active } : s)));
+
+    if (API_BASE_URL) {
+      apiFetch<{ success: boolean; active?: boolean; error?: string }>(`/api/admin/staff/${id}/toggle-active`, {
+        method: 'PATCH',
+      }).catch((error) => {
+        console.warn('Staff activation toggle failed to persist:', error instanceof Error ? error.message : error);
+      });
+    }
   };
 
   const setFinalist = (teamId: string, isFinalist: boolean) => {
@@ -1038,6 +1301,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setReviews((prev) => prev.filter((r) => r.judgeId !== id));
     setOnsiteScores((prev) => prev.filter((o) => o.judgeId !== id));
     addAuditLog('DELETE_STAFF', 'staff', id, { name: target.name, email: target.email, role: target.role });
+
+    if (API_BASE_URL) {
+      apiFetch<{ success: boolean; error?: string }>(`/api/admin/staff/${id}`, {
+        method: 'DELETE',
+      }).catch((error) => {
+        console.warn('Staff deletion failed to persist:', error instanceof Error ? error.message : error);
+      });
+    }
   };
 
   const toggleTeamBan = (teamId: string) => {

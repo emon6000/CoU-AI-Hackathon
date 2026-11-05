@@ -10,7 +10,7 @@ VALUES (
   'a0000000-0000-0000-0000-000000000001',
   'Super Admin CoU',
   'admin@cou.ac.bd',
-  '$2b$12$e8wWwPcvZ/HhYyN8u4gD8.Kz9Qf5L0Vl0q6q1Z8kLhZ7vH2r5pZ.u',
+  '$2b$12$ihLItXLm3aczWgXeJLDvOuV54DmPsMdDo3QPsnAHR97YWGihQZqPO',
   false,
   'super_admin',
   true

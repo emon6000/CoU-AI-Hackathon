@@ -137,7 +137,7 @@ export const RegisterPage: React.FC<{ navigate: (route: string) => void }> = ({ 
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -165,7 +165,7 @@ export const RegisterPage: React.FC<{ navigate: (route: string) => void }> = ({ 
 
     setIsSubmitting(true);
 
-    const result = registerTeam({
+    const result = await registerTeam({
       teamName: teamName.trim(),
       university: university.trim(),
       description: description.trim(),
